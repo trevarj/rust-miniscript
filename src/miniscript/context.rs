@@ -384,7 +384,7 @@ impl ScriptContext for Legacy {
         // 1. Check the node first, throw an error on the language itself
         let node_checked = match ms.node {
             Terminal::PkK(ref pk) => Self::check_pk(pk),
-            Terminal::Multi(ref thresh) => {
+            Terminal::Multi(ref thresh) | Terminal::SortedMulti(ref thresh) => {
                 for pk in thresh.iter() {
                     Self::check_pk(pk)?;
                 }

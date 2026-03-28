@@ -222,29 +222,15 @@ pub fn test_desc_satisfy(
                 Descriptor::Pkh(pk) => find_sk_single_key(*pk.as_inner(), testdata),
                 Descriptor::Wpkh(pk) => find_sk_single_key(*pk.as_inner(), testdata),
                 Descriptor::Sh(sh) => match sh.as_inner() {
-                    miniscript::descriptor::ShInner::Wsh(wsh) => match wsh.as_inner() {
-                        miniscript::descriptor::WshInner::SortedMulti(ref smv) => {
-                            let ms = Miniscript::from_ast(smv.sorted_node()).unwrap();
-                            find_sks_ms(&ms, testdata)
-                        }
-                        miniscript::descriptor::WshInner::Ms(ref ms) => find_sks_ms(ms, testdata),
-                    },
+                    miniscript::descriptor::ShInner::Wsh(wsh) => {
+                        find_sks_ms(wsh.as_inner(), testdata)
+                    }
                     miniscript::descriptor::ShInner::Wpkh(pk) => {
                         find_sk_single_key(*pk.as_inner(), testdata)
                     }
-                    miniscript::descriptor::ShInner::SortedMulti(smv) => {
-                        let ms = Miniscript::from_ast(smv.sorted_node()).unwrap();
-                        find_sks_ms(&ms, testdata)
-                    }
                     miniscript::descriptor::ShInner::Ms(ms) => find_sks_ms(ms, testdata),
                 },
-                Descriptor::Wsh(wsh) => match wsh.as_inner() {
-                    miniscript::descriptor::WshInner::SortedMulti(ref smv) => {
-                        let ms = Miniscript::from_ast(smv.sorted_node()).unwrap();
-                        find_sks_ms(&ms, testdata)
-                    }
-                    miniscript::descriptor::WshInner::Ms(ref ms) => find_sks_ms(ms, testdata),
-                },
+                Descriptor::Wsh(wsh) => find_sks_ms(wsh.as_inner(), testdata),
                 Descriptor::Tr(_tr) => unreachable!("Tr checked earlier"),
             };
             let msg = psbt
@@ -316,13 +302,25 @@ fn find_sks_ms<Ctx: ScriptContext>(
 ) -> Vec<secp256k1::SecretKey> {
     let sks = &testdata.secretdata.sks;
     let pks = &testdata.pubdata.pks;
-    let sks = ms
-        .iter_pk()
-        .filter_map(|pk| {
-            let i = pks.iter().position(|&x| x.to_public_key() == pk);
-            i.map(|idx| sks[idx])
-        })
-        .collect();
+    // HACK: find a better way to sort these keys
+    let sks = if let miniscript::Terminal::SortedMulti(thresh) = &ms.node {
+        thresh
+            .clone()
+            .into_sorted_bip67()
+            .iter()
+            .filter_map(|pk| {
+                let i = pks.iter().position(|&x| x.to_public_key() == *pk);
+                i.map(|idx| sks[idx])
+            })
+            .collect()
+    } else {
+        ms.iter_pk()
+            .filter_map(|pk| {
+                let i = pks.iter().position(|&x| x.to_public_key() == pk);
+                i.map(|idx| sks[idx])
+            })
+            .collect()
+    };
     sks
 }
 
