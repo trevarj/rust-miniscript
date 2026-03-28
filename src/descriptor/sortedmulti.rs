@@ -126,6 +126,15 @@ impl<Pk: MiniscriptKey, Ctx: ScriptContext> SortedMultiVec<Pk, Ctx> {
         Terminal::Multi(self.inner.to_sorted())
     }
 
+    /// Accessor for the sorted public keys in the multisig. Clones and returns
+    /// owned key data.
+    pub fn into_sorted_pks(&self) -> Vec<Pk>
+    where
+        Pk: ToPublicKey,
+    {
+        self.inner.to_sorted().into_data()
+    }
+
     /// Encode as a Bitcoin script
     pub fn encode(&self) -> script::ScriptBuf
     where
