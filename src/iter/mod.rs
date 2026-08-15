@@ -14,8 +14,55 @@ pub use tree::{
     VerbosePreOrderIter,
 };
 
+use crate::prelude::*;
 use crate::sync::Arc;
-use crate::{Miniscript, MiniscriptKey, ScriptContext, Terminal};
+use crate::{Miniscript, MiniscriptKey, ScriptContext, Terminal, Threshold};
+
+/// Extension trait for the stacks used by algorithms which reconstruct a tree
+/// from a [`TreeLike::post_order_iter`].
+///
+/// Since a post-order iterator yields children left-to-right, the children of
+/// a node appear in that same order at the top of the stack. These methods pop
+/// them off and hand them back in that order, rather than reversed as a bare
+/// sequence of [`Vec::pop`] calls would.
+pub(crate) trait StackExt<T> {
+    /// Pops the top two elements off of the stack and passes them, in
+    /// left-to-right order, to `f`.
+    fn pop2<R>(&mut self, f: impl FnOnce(T, T) -> R) -> R;
+
+    /// Pops the top three elements off of the stack and passes them, in
+    /// left-to-right order, to `f`.
+    fn pop3<R>(&mut self, f: impl FnOnce(T, T, T) -> R) -> R;
+
+    /// Pops the top `n` elements off of the stack, in left-to-right order.
+    fn pop_n(&mut self, n: usize) -> Vec<T>;
+
+    /// Pops the children of `thresh` off of the stack, in left-to-right order,
+    /// and reassembles them into a threshold with the same `k`.
+    fn pop_thresh<U, const MAX: usize>(&mut self, thresh: &Threshold<U, MAX>) -> Threshold<T, MAX>;
+}
+
+impl<T> StackExt<T> for Vec<T> {
+    fn pop2<R>(&mut self, f: impl FnOnce(T, T) -> R) -> R {
+        let b = self.pop().unwrap();
+        let a = self.pop().unwrap();
+        f(a, b)
+    }
+
+    fn pop3<R>(&mut self, f: impl FnOnce(T, T, T) -> R) -> R {
+        let c = self.pop().unwrap();
+        let b = self.pop().unwrap();
+        let a = self.pop().unwrap();
+        f(a, b, c)
+    }
+
+    fn pop_n(&mut self, n: usize) -> Self { self.split_off(self.len() - n) }
+
+    fn pop_thresh<U, const MAX: usize>(&mut self, thresh: &Threshold<U, MAX>) -> Threshold<T, MAX> {
+        let mut children = self.pop_n(thresh.n()).into_iter();
+        thresh.map_ref(|_| children.next().unwrap())
+    }
+}
 
 impl<'a, Pk: MiniscriptKey, Ctx: ScriptContext> TreeLike for &'a Miniscript<Pk, Ctx> {
     type NaryChildren = &'a [Arc<Miniscript<Pk, Ctx>>];

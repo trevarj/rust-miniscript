@@ -10,7 +10,7 @@ use core::{cmp, fmt, str};
 use bitcoin::{absolute, relative};
 
 use super::ENTAILMENT_MAX_TERMINALS;
-use crate::iter::{Tree, TreeLike};
+use crate::iter::{StackExt as _, Tree, TreeLike};
 use crate::prelude::*;
 use crate::sync::Arc;
 use crate::{
@@ -163,12 +163,7 @@ impl<Pk: MiniscriptKey> Policy<Pk> {
                 Hash160(ref h) => t.hash160(h).map(Hash160)?,
                 Older(ref n) => Older(*n),
                 After(ref n) => After(*n),
-                Thresh(ref thresh) => {
-                    let mut children = translated
-                        .split_off(translated.len() - thresh.n())
-                        .into_iter();
-                    Thresh(thresh.map_ref(|_| children.next().unwrap()))
-                }
+                Thresh(ref thresh) => Thresh(translated.pop_thresh(thresh)),
             };
             translated.push(Arc::new(new_policy));
         }
@@ -219,10 +214,7 @@ impl<Pk: MiniscriptKey> Policy<Pk> {
         let mut n_terminals = vec![];
         for data in self.post_order_iter() {
             let num = match data.node {
-                Self::Thresh(thresh) => n_terminals
-                    .split_off(n_terminals.len() - thresh.n())
-                    .into_iter()
-                    .sum(),
+                Self::Thresh(thresh) => n_terminals.pop_n(thresh.n()).into_iter().sum(),
                 Self::Trivial | Self::Unsatisfiable => 0,
                 _leaf => 1,
             };
@@ -945,10 +937,7 @@ impl<Pk: MiniscriptKey> Policy<Pk> {
                         Some(Self::Unsatisfiable)
                     }
                 }
-                Self::Thresh(ref thresh) => {
-                    let mut children = at_age.split_off(at_age.len() - thresh.n()).into_iter();
-                    Some(Self::Thresh(thresh.map_ref(|_| children.next().unwrap())))
-                }
+                Self::Thresh(ref thresh) => Some(Self::Thresh(at_age.pop_thresh(thresh))),
                 _ => None,
             };
             match new_policy {
@@ -976,10 +965,7 @@ impl<Pk: MiniscriptKey> Policy<Pk> {
                         Some(Self::Unsatisfiable)
                     }
                 }
-                Self::Thresh(ref thresh) => {
-                    let mut children = at_age.split_off(at_age.len() - thresh.n()).into_iter();
-                    Some(Self::Thresh(thresh.map_ref(|_| children.next().unwrap())))
-                }
+                Self::Thresh(ref thresh) => Some(Self::Thresh(at_age.pop_thresh(thresh))),
                 _ => None,
             };
             match new_policy {
@@ -1023,7 +1009,7 @@ impl<Pk: MiniscriptKey> Policy<Pk> {
                 Self::Key(..) => Some(1),
                 Self::Thresh(ref thresh) => {
                     let mut sublens = minimum_n_keys
-                        .split_off(minimum_n_keys.len() - thresh.n())
+                        .pop_n(thresh.n())
                         .into_iter()
                         .flatten()
                         .collect::<Vec<usize>>();
@@ -1054,8 +1040,7 @@ impl<Pk: MiniscriptKey> Policy<Pk> {
         for data in Arc::new(self).post_order_iter() {
             let new_policy = match data.node.as_ref() {
                 Self::Thresh(ref thresh) => {
-                    let mut children = sorted.split_off(sorted.len() - thresh.n()).into_iter();
-                    let mut new_thresh = thresh.map_ref(|_| children.next().unwrap());
+                    let mut new_thresh = sorted.pop_thresh(thresh);
                     new_thresh.data_mut().sort();
                     Some(Self::Thresh(new_thresh))
                 }

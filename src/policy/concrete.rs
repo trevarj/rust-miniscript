@@ -21,7 +21,7 @@ use {
 };
 
 use crate::expression::{self, FromTree};
-use crate::iter::{Tree, TreeLike};
+use crate::iter::{StackExt as _, Tree, TreeLike};
 use crate::miniscript::types::extra_props::TimelockInfo;
 use crate::prelude::*;
 use crate::sync::Arc;
@@ -721,17 +721,13 @@ impl<Pk: MiniscriptKey> Policy<Pk> {
                 Hash160(ref h) => t.hash160(h).map(Hash160)?,
                 Older(ref n) => Older(*n),
                 After(ref n) => After(*n),
-                And(ref subs) => And(translated.split_off(translated.len() - subs.len())),
-                Or(ref subs) => {
-                    let children = translated.split_off(translated.len() - subs.len());
-                    Or(subs.iter().map(|(prob, _)| *prob).zip(children).collect())
-                }
-                Thresh(ref thresh) => {
-                    let mut children = translated
-                        .split_off(translated.len() - thresh.n())
-                        .into_iter();
-                    Thresh(thresh.map_ref(|_| children.next().unwrap()))
-                }
+                And(ref subs) => And(translated.pop_n(subs.len())),
+                Or(ref subs) => Or(subs
+                    .iter()
+                    .map(|(prob, _)| *prob)
+                    .zip(translated.pop_n(subs.len()))
+                    .collect()),
+                Thresh(ref thresh) => Thresh(translated.pop_thresh(thresh)),
             };
             translated.push(Arc::new(new_policy));
         }
@@ -749,17 +745,13 @@ impl<Pk: MiniscriptKey> Policy<Pk> {
         for data in Arc::new(self).post_order_iter() {
             let new_policy = match data.node.as_ref() {
                 Self::Key(ref k) if k.clone() == *key => Some(Self::Unsatisfiable),
-                And(ref subs) => Some(And(translated.split_off(translated.len() - subs.len()))),
-                Or(ref subs) => {
-                    let children = translated.split_off(translated.len() - subs.len());
-                    Some(Or(subs.iter().map(|(prob, _)| *prob).zip(children).collect()))
-                }
-                Thresh(ref thresh) => {
-                    let mut children = translated
-                        .split_off(translated.len() - thresh.n())
-                        .into_iter();
-                    Some(Thresh(thresh.map_ref(|_| children.next().unwrap())))
-                }
+                And(ref subs) => Some(And(translated.pop_n(subs.len()))),
+                Or(ref subs) => Some(Or(subs
+                    .iter()
+                    .map(|(prob, _)| *prob)
+                    .zip(translated.pop_n(subs.len()))
+                    .collect())),
+                Thresh(ref thresh) => Some(Thresh(translated.pop_thresh(thresh))),
                 _ => None,
             };
             match new_policy {
@@ -854,15 +846,15 @@ impl<Pk: MiniscriptKey> Policy<Pk> {
                     contains_combination: false,
                 },
                 And(ref subs) => {
-                    let iter = infos.split_off(infos.len() - subs.len()).into_iter();
+                    let iter = infos.pop_n(subs.len()).into_iter();
                     TimelockInfo::combine_threshold(subs.len(), iter)
                 }
                 Or(ref subs) => {
-                    let iter = infos.split_off(infos.len() - subs.len()).into_iter();
+                    let iter = infos.pop_n(subs.len()).into_iter();
                     TimelockInfo::combine_threshold(1, iter)
                 }
                 Thresh(ref thresh) => {
-                    let iter = infos.split_off(infos.len() - thresh.n()).into_iter();
+                    let iter = infos.pop_n(thresh.n()).into_iter();
                     TimelockInfo::combine_threshold(thresh.k(), iter)
                 }
                 _ => TimelockInfo::default(),
@@ -902,14 +894,14 @@ impl<Pk: MiniscriptKey> Policy<Pk> {
                 }
                 And(ref subs) => {
                     let (atleast_one_signed, all_non_mall) = acc
-                        .split_off(acc.len() - subs.len())
+                        .pop_n(subs.len())
                         .into_iter()
                         .fold((false, true), |acc, x: (bool, bool)| (acc.0 || x.0, acc.1 && x.1));
                     (atleast_one_signed, all_non_mall)
                 }
                 Or(ref subs) => {
                     let (all_signed, atleast_one_signed, all_non_mall) = acc
-                        .split_off(acc.len() - subs.len())
+                        .pop_n(subs.len())
                         .into_iter()
                         .fold((true, false, true), |acc, x| {
                             (acc.0 && x.0, acc.1 || x.0, acc.2 && x.1)
@@ -917,12 +909,12 @@ impl<Pk: MiniscriptKey> Policy<Pk> {
                     (all_signed, atleast_one_signed && all_non_mall)
                 }
                 Thresh(ref thresh) => {
-                    let (signed_count, non_mall_count) = acc
-                        .split_off(acc.len() - thresh.n())
-                        .into_iter()
-                        .fold((0, 0), |(signed_count, non_mall_count), (signed, non_mall)| {
+                    let (signed_count, non_mall_count) = acc.pop_n(thresh.n()).into_iter().fold(
+                        (0, 0),
+                        |(signed_count, non_mall_count), (signed, non_mall)| {
                             (signed_count + signed as usize, non_mall_count + non_mall as usize)
-                        });
+                        },
+                    );
                     (
                         signed_count >= (thresh.n() - thresh.k() + 1),
                         non_mall_count == thresh.n() && signed_count >= (thresh.n() - thresh.k()),

@@ -21,7 +21,7 @@ pub mod semantic;
 pub use self::concrete::Policy as Concrete;
 pub use self::semantic::Policy as Semantic;
 use crate::descriptor::Descriptor;
-use crate::iter::TreeLike as _;
+use crate::iter::{StackExt as _, TreeLike as _};
 use crate::miniscript::{Miniscript, ScriptContext};
 use crate::sync::Arc;
 #[cfg(all(not(feature = "std"), not(test)))]
@@ -138,27 +138,19 @@ impl<Pk: MiniscriptKey, Ctx: ScriptContext> Liftable<Pk> for Miniscript<Pk, Ctx>
                 | Terminal::NonZero(..)
                 | Terminal::ZeroNotEqual(..) => stack.pop().unwrap(),
                 Terminal::AndV(..) | Terminal::AndB(..) => {
-                    let right = stack.pop().unwrap();
-                    let left = stack.pop().unwrap();
-                    Arc::new(Semantic::Thresh(Threshold::and(left, right)))
+                    stack.pop2(|a, b| Arc::new(Semantic::Thresh(Threshold::and(a, b))))
                 }
-                Terminal::AndOr(..) => {
-                    let c = stack.pop().unwrap();
-                    let b = stack.pop().unwrap();
-                    let a = stack.pop().unwrap();
+                Terminal::AndOr(..) => stack.pop3(|a, b, c| {
                     Arc::new(Semantic::Thresh(Threshold::or(
                         Arc::new(Semantic::Thresh(Threshold::and(a, b))),
                         c,
                     )))
-                }
+                }),
                 Terminal::OrB(..) | Terminal::OrD(..) | Terminal::OrC(..) | Terminal::OrI(..) => {
-                    let right = stack.pop().unwrap();
-                    let left = stack.pop().unwrap();
-                    Arc::new(Semantic::Thresh(Threshold::or(left, right)))
+                    stack.pop2(|a, b| Arc::new(Semantic::Thresh(Threshold::or(a, b))))
                 }
                 Terminal::Thresh(ref thresh) => {
-                    let mut children = stack.split_off(stack.len() - thresh.n()).into_iter();
-                    Arc::new(Semantic::Thresh(thresh.map_ref(|_| children.next().unwrap())))
+                    Arc::new(Semantic::Thresh(stack.pop_thresh(thresh)))
                 }
                 Terminal::Multi(ref thresh) | Terminal::SortedMulti(ref thresh) => {
                     Arc::new(Semantic::Thresh(
