@@ -89,7 +89,7 @@ mod private {
         ///   and they can call `Miniscript::clone`.
         fn clone(&self) -> Self {
             let mut stack = vec![];
-            for item in self.rtl_post_order_iter() {
+            for item in self.post_order_iter() {
                 let new_term = match item.node.node {
                     Terminal::PkK(ref p) => Terminal::PkK(p.clone()),
                     Terminal::PkH(ref p) => Terminal::PkH(p.clone()),
@@ -110,22 +110,44 @@ mod private {
                     Terminal::NonZero(..) => Terminal::NonZero(stack.pop().unwrap()),
                     Terminal::ZeroNotEqual(..) => Terminal::ZeroNotEqual(stack.pop().unwrap()),
                     Terminal::AndV(..) => {
-                        Terminal::AndV(stack.pop().unwrap(), stack.pop().unwrap())
+                        let right = stack.pop().unwrap();
+                        let left = stack.pop().unwrap();
+                        Terminal::AndV(left, right)
                     }
                     Terminal::AndB(..) => {
-                        Terminal::AndB(stack.pop().unwrap(), stack.pop().unwrap())
+                        let right = stack.pop().unwrap();
+                        let left = stack.pop().unwrap();
+                        Terminal::AndB(left, right)
                     }
-                    Terminal::AndOr(..) => Terminal::AndOr(
-                        stack.pop().unwrap(),
-                        stack.pop().unwrap(),
-                        stack.pop().unwrap(),
-                    ),
-                    Terminal::OrB(..) => Terminal::OrB(stack.pop().unwrap(), stack.pop().unwrap()),
-                    Terminal::OrD(..) => Terminal::OrD(stack.pop().unwrap(), stack.pop().unwrap()),
-                    Terminal::OrC(..) => Terminal::OrC(stack.pop().unwrap(), stack.pop().unwrap()),
-                    Terminal::OrI(..) => Terminal::OrI(stack.pop().unwrap(), stack.pop().unwrap()),
+                    Terminal::AndOr(..) => {
+                        let c = stack.pop().unwrap();
+                        let b = stack.pop().unwrap();
+                        let a = stack.pop().unwrap();
+                        Terminal::AndOr(a, b, c)
+                    }
+                    Terminal::OrB(..) => {
+                        let right = stack.pop().unwrap();
+                        let left = stack.pop().unwrap();
+                        Terminal::OrB(left, right)
+                    }
+                    Terminal::OrD(..) => {
+                        let right = stack.pop().unwrap();
+                        let left = stack.pop().unwrap();
+                        Terminal::OrD(left, right)
+                    }
+                    Terminal::OrC(..) => {
+                        let right = stack.pop().unwrap();
+                        let left = stack.pop().unwrap();
+                        Terminal::OrC(left, right)
+                    }
+                    Terminal::OrI(..) => {
+                        let right = stack.pop().unwrap();
+                        let left = stack.pop().unwrap();
+                        Terminal::OrI(left, right)
+                    }
                     Terminal::Thresh(ref thresh) => {
-                        Terminal::Thresh(thresh.map_ref(|_| stack.pop().unwrap()))
+                        let mut children = stack.split_off(stack.len() - thresh.n()).into_iter();
+                        Terminal::Thresh(thresh.map_ref(|_| children.next().unwrap()))
                     }
                     Terminal::Multi(ref thresh) => Terminal::Multi(thresh.clone()),
                     Terminal::SortedMulti(ref thresh) => Terminal::SortedMulti(thresh.clone()),
@@ -876,7 +898,7 @@ impl<Pk: MiniscriptKey, Ctx: ScriptContext> Miniscript<Pk, Ctx> {
         T: Translator<Pk>,
     {
         let mut translated = vec![];
-        for data in self.rtl_post_order_iter() {
+        for data in self.post_order_iter() {
             let new_term = match data.node.node {
                 Terminal::PkK(ref p) => Terminal::PkK(t.pk(p)?),
                 Terminal::PkH(ref p) => Terminal::PkH(t.pk(p)?),
@@ -897,30 +919,46 @@ impl<Pk: MiniscriptKey, Ctx: ScriptContext> Miniscript<Pk, Ctx> {
                 Terminal::NonZero(..) => Terminal::NonZero(translated.pop().unwrap()),
                 Terminal::ZeroNotEqual(..) => Terminal::ZeroNotEqual(translated.pop().unwrap()),
                 Terminal::AndV(..) => {
-                    Terminal::AndV(translated.pop().unwrap(), translated.pop().unwrap())
+                    let right = translated.pop().unwrap();
+                    let left = translated.pop().unwrap();
+                    Terminal::AndV(left, right)
                 }
                 Terminal::AndB(..) => {
-                    Terminal::AndB(translated.pop().unwrap(), translated.pop().unwrap())
+                    let right = translated.pop().unwrap();
+                    let left = translated.pop().unwrap();
+                    Terminal::AndB(left, right)
                 }
-                Terminal::AndOr(..) => Terminal::AndOr(
-                    translated.pop().unwrap(),
-                    translated.pop().unwrap(),
-                    translated.pop().unwrap(),
-                ),
+                Terminal::AndOr(..) => {
+                    let c = translated.pop().unwrap();
+                    let b = translated.pop().unwrap();
+                    let a = translated.pop().unwrap();
+                    Terminal::AndOr(a, b, c)
+                }
                 Terminal::OrB(..) => {
-                    Terminal::OrB(translated.pop().unwrap(), translated.pop().unwrap())
+                    let right = translated.pop().unwrap();
+                    let left = translated.pop().unwrap();
+                    Terminal::OrB(left, right)
                 }
                 Terminal::OrD(..) => {
-                    Terminal::OrD(translated.pop().unwrap(), translated.pop().unwrap())
+                    let right = translated.pop().unwrap();
+                    let left = translated.pop().unwrap();
+                    Terminal::OrD(left, right)
                 }
                 Terminal::OrC(..) => {
-                    Terminal::OrC(translated.pop().unwrap(), translated.pop().unwrap())
+                    let right = translated.pop().unwrap();
+                    let left = translated.pop().unwrap();
+                    Terminal::OrC(left, right)
                 }
                 Terminal::OrI(..) => {
-                    Terminal::OrI(translated.pop().unwrap(), translated.pop().unwrap())
+                    let right = translated.pop().unwrap();
+                    let left = translated.pop().unwrap();
+                    Terminal::OrI(left, right)
                 }
                 Terminal::Thresh(ref thresh) => {
-                    Terminal::Thresh(thresh.map_ref(|_| translated.pop().unwrap()))
+                    let mut children = translated
+                        .split_off(translated.len() - thresh.n())
+                        .into_iter();
+                    Terminal::Thresh(thresh.map_ref(|_| children.next().unwrap()))
                 }
                 Terminal::Multi(ref thresh) => Terminal::Multi(thresh.translate_ref(|k| t.pk(k))?),
                 Terminal::SortedMulti(ref thresh) => {
@@ -943,7 +981,7 @@ impl<Pk: MiniscriptKey, Ctx: ScriptContext> Miniscript<Pk, Ctx> {
     /// Substitutes raw public keys hashes with the public keys as provided by map.
     pub fn substitute_raw_pkh(&self, pk_map: &BTreeMap<hash160::Hash, Pk>) -> Self {
         let mut stack = vec![];
-        for item in self.rtl_post_order_iter() {
+        for item in self.post_order_iter() {
             let new_term = match item.node.node {
                 Terminal::PkK(ref p) => Terminal::PkK(p.clone()),
                 Terminal::PkH(ref p) => Terminal::PkH(p.clone()),
@@ -967,19 +1005,45 @@ impl<Pk: MiniscriptKey, Ctx: ScriptContext> Miniscript<Pk, Ctx> {
                 Terminal::Verify(..) => Terminal::Verify(stack.pop().unwrap()),
                 Terminal::NonZero(..) => Terminal::NonZero(stack.pop().unwrap()),
                 Terminal::ZeroNotEqual(..) => Terminal::ZeroNotEqual(stack.pop().unwrap()),
-                Terminal::AndV(..) => Terminal::AndV(stack.pop().unwrap(), stack.pop().unwrap()),
-                Terminal::AndB(..) => Terminal::AndB(stack.pop().unwrap(), stack.pop().unwrap()),
-                Terminal::AndOr(..) => Terminal::AndOr(
-                    stack.pop().unwrap(),
-                    stack.pop().unwrap(),
-                    stack.pop().unwrap(),
-                ),
-                Terminal::OrB(..) => Terminal::OrB(stack.pop().unwrap(), stack.pop().unwrap()),
-                Terminal::OrD(..) => Terminal::OrD(stack.pop().unwrap(), stack.pop().unwrap()),
-                Terminal::OrC(..) => Terminal::OrC(stack.pop().unwrap(), stack.pop().unwrap()),
-                Terminal::OrI(..) => Terminal::OrI(stack.pop().unwrap(), stack.pop().unwrap()),
+                Terminal::AndV(..) => {
+                    let right = stack.pop().unwrap();
+                    let left = stack.pop().unwrap();
+                    Terminal::AndV(left, right)
+                }
+                Terminal::AndB(..) => {
+                    let right = stack.pop().unwrap();
+                    let left = stack.pop().unwrap();
+                    Terminal::AndB(left, right)
+                }
+                Terminal::AndOr(..) => {
+                    let c = stack.pop().unwrap();
+                    let b = stack.pop().unwrap();
+                    let a = stack.pop().unwrap();
+                    Terminal::AndOr(a, b, c)
+                }
+                Terminal::OrB(..) => {
+                    let right = stack.pop().unwrap();
+                    let left = stack.pop().unwrap();
+                    Terminal::OrB(left, right)
+                }
+                Terminal::OrD(..) => {
+                    let right = stack.pop().unwrap();
+                    let left = stack.pop().unwrap();
+                    Terminal::OrD(left, right)
+                }
+                Terminal::OrC(..) => {
+                    let right = stack.pop().unwrap();
+                    let left = stack.pop().unwrap();
+                    Terminal::OrC(left, right)
+                }
+                Terminal::OrI(..) => {
+                    let right = stack.pop().unwrap();
+                    let left = stack.pop().unwrap();
+                    Terminal::OrI(left, right)
+                }
                 Terminal::Thresh(ref thresh) => {
-                    Terminal::Thresh(thresh.map_ref(|_| stack.pop().unwrap()))
+                    let mut children = stack.split_off(stack.len() - thresh.n()).into_iter();
+                    Terminal::Thresh(thresh.map_ref(|_| children.next().unwrap()))
                 }
                 Terminal::Multi(ref thresh) => Terminal::Multi(thresh.clone()),
                 Terminal::SortedMulti(ref thresh) => Terminal::SortedMulti(thresh.clone()),

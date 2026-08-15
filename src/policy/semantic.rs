@@ -152,7 +152,7 @@ impl<Pk: MiniscriptKey> Policy<Pk> {
         use Policy::*;
 
         let mut translated = vec![];
-        for data in self.rtl_post_order_iter() {
+        for data in self.post_order_iter() {
             let new_policy = match data.node {
                 Unsatisfiable => Unsatisfiable,
                 Trivial => Trivial,
@@ -163,7 +163,12 @@ impl<Pk: MiniscriptKey> Policy<Pk> {
                 Hash160(ref h) => t.hash160(h).map(Hash160)?,
                 Older(ref n) => Older(*n),
                 After(ref n) => After(*n),
-                Thresh(ref thresh) => Thresh(thresh.map_ref(|_| translated.pop().unwrap())),
+                Thresh(ref thresh) => {
+                    let mut children = translated
+                        .split_off(translated.len() - thresh.n())
+                        .into_iter();
+                    Thresh(thresh.map_ref(|_| children.next().unwrap()))
+                }
             };
             translated.push(Arc::new(new_policy));
         }
@@ -212,9 +217,12 @@ impl<Pk: MiniscriptKey> Policy<Pk> {
     // Helper function to compute the number of constraints in policy.
     fn n_terminals(&self) -> usize {
         let mut n_terminals = vec![];
-        for data in self.rtl_post_order_iter() {
+        for data in self.post_order_iter() {
             let num = match data.node {
-                Self::Thresh(thresh) => (0..thresh.n()).map(|_| n_terminals.pop().unwrap()).sum(),
+                Self::Thresh(thresh) => n_terminals
+                    .split_off(n_terminals.len() - thresh.n())
+                    .into_iter()
+                    .sum(),
                 Self::Trivial | Self::Unsatisfiable => 0,
                 _leaf => 1,
             };
@@ -928,7 +936,7 @@ impl<Pk: MiniscriptKey> Policy<Pk> {
     /// that are not satisfied at the given `age`.
     pub fn at_age(self, age: relative::LockTime) -> Self {
         let mut at_age = vec![];
-        for data in Arc::new(self).rtl_post_order_iter() {
+        for data in Arc::new(self).post_order_iter() {
             let new_policy = match data.node.as_ref() {
                 Self::Older(ref t) => {
                     if relative::LockTime::from(*t).is_implied_by(age) {
@@ -938,7 +946,8 @@ impl<Pk: MiniscriptKey> Policy<Pk> {
                     }
                 }
                 Self::Thresh(ref thresh) => {
-                    Some(Self::Thresh(thresh.map_ref(|_| at_age.pop().unwrap())))
+                    let mut children = at_age.split_off(at_age.len() - thresh.n()).into_iter();
+                    Some(Self::Thresh(thresh.map_ref(|_| children.next().unwrap())))
                 }
                 _ => None,
             };
@@ -958,7 +967,7 @@ impl<Pk: MiniscriptKey> Policy<Pk> {
     /// that are not satisfied at the given `n` (`n OP_CHECKLOCKTIMEVERIFY`).
     pub fn at_lock_time(self, n: absolute::LockTime) -> Self {
         let mut at_age = vec![];
-        for data in Arc::new(self).rtl_post_order_iter() {
+        for data in Arc::new(self).post_order_iter() {
             let new_policy = match data.node.as_ref() {
                 Self::After(t) => {
                     if absolute::LockTime::from(*t).is_implied_by(n) {
@@ -968,7 +977,8 @@ impl<Pk: MiniscriptKey> Policy<Pk> {
                     }
                 }
                 Self::Thresh(ref thresh) => {
-                    Some(Self::Thresh(thresh.map_ref(|_| at_age.pop().unwrap())))
+                    let mut children = at_age.split_off(at_age.len() - thresh.n()).into_iter();
+                    Some(Self::Thresh(thresh.map_ref(|_| children.next().unwrap())))
                 }
                 _ => None,
             };
@@ -1000,7 +1010,7 @@ impl<Pk: MiniscriptKey> Policy<Pk> {
     /// Returns `None` if the policy is not satisfiable.
     pub fn minimum_n_keys(&self) -> Option<usize> {
         let mut minimum_n_keys = vec![];
-        for data in self.rtl_post_order_iter() {
+        for data in self.post_order_iter() {
             let minimum_n_key = match data.node {
                 Self::Unsatisfiable => None,
                 Self::Trivial
@@ -1012,8 +1022,10 @@ impl<Pk: MiniscriptKey> Policy<Pk> {
                 | Self::Hash160(..) => Some(0),
                 Self::Key(..) => Some(1),
                 Self::Thresh(ref thresh) => {
-                    let mut sublens = (0..thresh.n())
-                        .filter_map(|_| minimum_n_keys.pop().unwrap())
+                    let mut sublens = minimum_n_keys
+                        .split_off(minimum_n_keys.len() - thresh.n())
+                        .into_iter()
+                        .flatten()
                         .collect::<Vec<usize>>();
                     if sublens.len() < thresh.k() {
                         // Not enough branches are satisfiable
@@ -1039,10 +1051,11 @@ impl<Pk: MiniscriptKey> Policy<Pk> {
     /// implemented.
     pub fn sorted(self) -> Self {
         let mut sorted = vec![];
-        for data in Arc::new(self).rtl_post_order_iter() {
+        for data in Arc::new(self).post_order_iter() {
             let new_policy = match data.node.as_ref() {
                 Self::Thresh(ref thresh) => {
-                    let mut new_thresh = thresh.map_ref(|_| sorted.pop().unwrap());
+                    let mut children = sorted.split_off(sorted.len() - thresh.n()).into_iter();
+                    let mut new_thresh = thresh.map_ref(|_| children.next().unwrap());
                     new_thresh.data_mut().sort();
                     Some(Self::Thresh(new_thresh))
                 }

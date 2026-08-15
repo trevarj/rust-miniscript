@@ -114,7 +114,7 @@ impl<Pk: MiniscriptKey, Ctx: ScriptContext> Liftable<Pk> for Miniscript<Pk, Ctx>
         self.lift_check()?;
 
         let mut stack = vec![];
-        for item in self.rtl_post_order_iter() {
+        for item in self.post_order_iter() {
             let new_term = match item.node.node {
                 Terminal::PkK(ref pk) | Terminal::PkH(ref pk) => {
                     Arc::new(Semantic::Key(pk.clone()))
@@ -137,24 +137,28 @@ impl<Pk: MiniscriptKey, Ctx: ScriptContext> Liftable<Pk> for Miniscript<Pk, Ctx>
                 | Terminal::Verify(..)
                 | Terminal::NonZero(..)
                 | Terminal::ZeroNotEqual(..) => stack.pop().unwrap(),
-                Terminal::AndV(..) | Terminal::AndB(..) => Arc::new(Semantic::Thresh(
-                    Threshold::and(stack.pop().unwrap(), stack.pop().unwrap()),
-                )),
-                Terminal::AndOr(..) => Arc::new(Semantic::Thresh(Threshold::or(
-                    Arc::new(Semantic::Thresh(Threshold::and(
-                        stack.pop().unwrap(),
-                        stack.pop().unwrap(),
-                    ))),
-                    stack.pop().unwrap(),
-                ))),
-                Terminal::OrB(..) | Terminal::OrD(..) | Terminal::OrC(..) | Terminal::OrI(..) => {
+                Terminal::AndV(..) | Terminal::AndB(..) => {
+                    let right = stack.pop().unwrap();
+                    let left = stack.pop().unwrap();
+                    Arc::new(Semantic::Thresh(Threshold::and(left, right)))
+                }
+                Terminal::AndOr(..) => {
+                    let c = stack.pop().unwrap();
+                    let b = stack.pop().unwrap();
+                    let a = stack.pop().unwrap();
                     Arc::new(Semantic::Thresh(Threshold::or(
-                        stack.pop().unwrap(),
-                        stack.pop().unwrap(),
+                        Arc::new(Semantic::Thresh(Threshold::and(a, b))),
+                        c,
                     )))
                 }
+                Terminal::OrB(..) | Terminal::OrD(..) | Terminal::OrC(..) | Terminal::OrI(..) => {
+                    let right = stack.pop().unwrap();
+                    let left = stack.pop().unwrap();
+                    Arc::new(Semantic::Thresh(Threshold::or(left, right)))
+                }
                 Terminal::Thresh(ref thresh) => {
-                    Arc::new(Semantic::Thresh(thresh.map_ref(|_| stack.pop().unwrap())))
+                    let mut children = stack.split_off(stack.len() - thresh.n()).into_iter();
+                    Arc::new(Semantic::Thresh(thresh.map_ref(|_| children.next().unwrap())))
                 }
                 Terminal::Multi(ref thresh) | Terminal::SortedMulti(ref thresh) => {
                     Arc::new(Semantic::Thresh(
